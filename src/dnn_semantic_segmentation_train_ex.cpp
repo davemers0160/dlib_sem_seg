@@ -20,7 +20,8 @@
     before reading this example program.
 */
 
-#include "dnn_semantic_segmentation_ex.h"
+#include "dnn_sem_seg.h"
+#include "dnn_sem_seg_net_ex.h"
 
 #include <iostream>
 #include <dlib/data_io.h>
