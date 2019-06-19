@@ -35,7 +35,7 @@ else()
     elseif(${PLATFORM} STREQUAL "SL02319")
         include(/mnt/data/dlib-19.17/dlib/cmake)
     else()
-        include(~/dlib/dlib/cmake)
+        include(~/dlib-19.17/dlib/cmake)
     endif()
 endif()
 

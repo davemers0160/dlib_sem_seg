@@ -348,7 +348,7 @@ int main(int argc, char** argv) try
 
         // make a 30-image mini-batch
         training_sample temp;
-        while(samples.size() < 30)
+        while(samples.size() < 24)
         {
             data.dequeue(temp);
 
