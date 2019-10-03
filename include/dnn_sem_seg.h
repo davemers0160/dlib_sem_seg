@@ -43,6 +43,11 @@ inline bool operator == (const dlib::rgb_pixel& a, const dlib::rgb_pixel& b)
     return a.red == b.red && a.green == b.green && a.blue == b.blue;
 }
 
+//inline bool operator == (const uint16_t &a, const uint16_t &b)
+//{
+//    return a == b;
+//}
+
 // ----------------------------------------------------------------------------------------
 
 // The PASCAL VOC2012 dataset contains 20 ground-truth classes + background.  Each class

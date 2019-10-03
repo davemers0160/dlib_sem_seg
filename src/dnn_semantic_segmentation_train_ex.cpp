@@ -21,7 +21,8 @@
 */
 
 #include "dnn_sem_seg.h"
-#include "dnn_sem_seg_net_ex.h"
+//#include "dnn_sem_seg_net_ex.h"
+#include "dfd_net_v14.h"
 
 #include <iostream>
 #include <dlib/data_io.h>
@@ -29,6 +30,7 @@
 #include <dlib/dir_nav.h>
 #include <iterator>
 #include <thread>
+#include <dlib/gui_widgets.h>
 
 using namespace std;
 using namespace dlib;
@@ -69,7 +71,7 @@ void randomly_crop_image (
 {
     const auto rect = make_random_cropping_rect_resnet(input_image, rnd);
 
-    const chip_details chip_details(rect, chip_dims(227, 227));
+    const chip_details chip_details(rect, chip_dims(224, 224));
 
     // Crop the input image.
     extract_image_chip(input_image, chip_details, crop.input_image, interpolate_bilinear());
@@ -164,6 +166,24 @@ const Voc2012class& find_voc2012_class(const dlib::rgb_pixel& rgb_label)
     );
 }
 
+const Voc2012class& find_voc2012_class(const uint16_t& index)
+{
+    return find_voc2012_class(
+        [&index](const Voc2012class& voc2012class)
+        {
+            return index == voc2012class.index;
+        }
+    );
+}
+
+
+// Convert a voc index in the range [0, 20] to an RGB pixel value.
+inline dlib::rgb_pixel index_label_to_rgb_label(const uint16_t& index)
+{
+    return find_voc2012_class(index).rgb_label;
+}
+
+
 // Convert an RGB class label to an index in the range [0, 20].
 inline uint16_t rgb_label_to_index_label(const dlib::rgb_pixel& rgb_label)
 {
@@ -199,18 +219,49 @@ double calculate_accuracy(anet_type& anet, const std::vector<image_info>& datase
     int num_right = 0;
     int num_wrong = 0;
 
-    matrix<rgb_pixel> input_image;
-    matrix<rgb_pixel> rgb_label_image;
+    matrix<rgb_pixel> input_image, tmp;
+    matrix<rgb_pixel> rgb_label_image, tmp_l, net_out_rgb;
     matrix<uint16_t> index_label_image;
     matrix<uint16_t> net_output;
+
+    dlib::image_window win0;
+    dlib::image_window win1;
+    dlib::image_window win2;
 
     for (const auto& image_info : dataset)
     {
         // Load the input image.
-        load_image(input_image, image_info.image_filename);
+        load_image(tmp, image_info.image_filename);
 
         // Load the ground-truth (RGB) labels.
-        load_image(rgb_label_image, image_info.label_filename);
+        load_image(tmp_l, image_info.label_filename);
+
+
+        // crop the images to the right network size
+        // get image size
+        long rows = tmp.nr();
+        long cols = tmp.nc();
+
+        // crop image based on limitations of the network and scaling behavior
+        uint32_t mod_size = 16;     // 16 -> standard network down/up sampling
+        uint32_t offset = 0;        // 0 -> default
+
+        int row_rem = (rows) % mod_size;
+        if (row_rem != 0)
+        {
+            rows = rows - row_rem + offset;
+        }
+
+        int col_rem = (cols) % mod_size;
+        if (col_rem != 0)
+        {
+            cols = cols - col_rem + offset;
+        }
+
+        input_image.set_size(rows, cols);
+        rgb_label_image.set_size(rows, cols);
+        dlib::set_subm(input_image, 0, 0, rows, cols) = dlib::subm(tmp, 0, 0, rows, cols);
+        dlib::set_subm(rgb_label_image, 0, 0, rows, cols) = dlib::subm(tmp_l, 0, 0, rows, cols);
 
         // Create predictions for each pixel. At this point, the type of each prediction
         // is an index (a value between 0 and 20). Note that the net may return an image
@@ -230,6 +281,8 @@ double calculate_accuracy(anet_type& anet, const std::vector<image_info>& datase
         const long nr = index_label_image.nr();
         const long nc = index_label_image.nc();
 
+        net_out_rgb.set_size(nr,nc);
+
         // Compare the predicted values to the ground-truth values.
         for (long r = 0; r < nr; ++r)
         {
@@ -247,9 +300,28 @@ double calculate_accuracy(anet_type& anet, const std::vector<image_info>& datase
                     {
                         ++num_wrong;
                     }
+
+                    dlib::assign_pixel(net_out_rgb(r,c),index_label_to_rgb_label(prediction));
                 }
             }
         }
+
+
+
+        win0.clear_overlay();
+        win0.set_image(input_image);
+        win0.set_title("Input Image");
+
+        win1.clear_overlay();
+        win1.set_image(dlib::matrix_cast<uint8_t>(10*index_label_image));
+        win1.set_title("Ground Truth");
+
+        win2.clear_overlay();
+        win2.set_image(dlib::matrix_cast<uint8_t>(10*net_output));
+        win2.set_title("DNN Map");
+
+        dlib::sleep(200);        
+
     }
 
     // Return the accuracy estimate.
@@ -260,7 +332,7 @@ double calculate_accuracy(anet_type& anet, const std::vector<image_info>& datase
 
 int main(int argc, char** argv) try
 {
-    if (argc != 2)
+    if (argc <= 2)
     {
         cout << "To run this program you need a copy of the PASCAL VOC2012 dataset." << endl;
         cout << endl;
@@ -268,6 +340,9 @@ int main(int argc, char** argv) try
         cout << "./dnn_semantic_segmentation_train_ex /path/to/VOC2012" << endl;
         return 1;
     }
+
+    std::string net_name = "pascal_voc2012_dfdnet_v4";
+    uint32_t crop_num = stoi(argv[2]);
 
     cout << "\nSCANNING PASCAL VOC2012 DATASET\n" << endl;
 
@@ -280,7 +355,8 @@ int main(int argc, char** argv) try
     }
         
 
-    const double initial_learning_rate = 0.1;
+    const double initial_learning_rate = 0.0001;
+    const double final_learning_rate = 0.0001*initial_learning_rate;
     const double weight_decay = 0.0001;
     const double momentum = 0.9;
 
@@ -288,15 +364,17 @@ int main(int argc, char** argv) try
     dnn_trainer<net_type> trainer(net,sgd(weight_decay, momentum));
     trainer.be_verbose();
     trainer.set_learning_rate(initial_learning_rate);
-    trainer.set_synchronization_file("pascal_voc2012_trainer_state_file.dat", std::chrono::minutes(10));
+    trainer.set_synchronization_file(net_name, std::chrono::minutes(10));
     // This threshold is probably excessively large.
     trainer.set_iterations_without_progress_threshold(5000);
     // Since the progress threshold is so large might as well set the batch normalization
     // stats window to something big too.
-    set_all_bn_running_stats_window_sizes(net, 1000);
+    //set_all_bn_running_stats_window_sizes(net, 1000);
 
     // Output training parameters.
     cout << endl << trainer << endl;
+
+    cout << endl << net << endl;
 
     std::vector<matrix<rgb_pixel>> samples;
     std::vector<matrix<uint16_t>> labels;
@@ -341,14 +419,14 @@ int main(int argc, char** argv) try
 
     // The main training loop.  Keep making mini-batches and giving them to the trainer.
     // We will run until the learning rate has dropped by a factor of 1e-4.
-    while(trainer.get_learning_rate() >= 1e-4)
+    while(trainer.get_learning_rate() >= final_learning_rate)
     {
         samples.clear();
         labels.clear();
 
         // make a 30-image mini-batch
         training_sample temp;
-        while(samples.size() < 24)
+        while(samples.size() < crop_num)
         {
             data.dequeue(temp);
 
@@ -372,17 +450,18 @@ int main(int argc, char** argv) try
 
     net.clean();
     cout << "saving network" << endl;
-    serialize("semantic_segmentation_voc2012net.dnn") << net;
+    serialize(net_name + "_final.dat") << net;
 
 
     // Make a copy of the network to use it for inference.
-    anet_type anet = net;
+    //anet_type anet = net;    
 
     cout << "Testing the network..." << endl;
 
     // Find the accuracy of the newly trained network on both the training and the validation sets.
-    cout << "train accuracy  :  " << calculate_accuracy(anet, get_pascal_voc2012_train_listing(argv[1])) << endl;
-    cout << "val accuracy    :  " << calculate_accuracy(anet, get_pascal_voc2012_val_listing(argv[1])) << endl;
+    cout << "train accuracy  :  " << calculate_accuracy(net, get_pascal_voc2012_train_listing(argv[1])) << endl;
+    cout << "val accuracy    :  " << calculate_accuracy(net, get_pascal_voc2012_val_listing(argv[1])) << endl;
+
 }
 catch(std::exception& e)
 {

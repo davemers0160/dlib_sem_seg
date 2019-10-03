@@ -28,6 +28,10 @@
     It would be a good idea to become familiar with dlib's DNN tooling before reading this
     example.  So you should read dnn_introduction_ex.cpp and dnn_introduction2_ex.cpp
     before reading this example program.
+
+    train accuracy  :  0.965295
+    val accuracy    :  0.836689
+
 */
 
 #ifndef DLIB_DNn_SEMANTIC_SEGMENTATION_EX_H_
